@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b1020">
+  <title>GoldHunterAI v5 — Satellite Database</title>
+
+  <style>
+    body{
+      font-family:system-ui,-apple-system,sans-serif;
+      margin:0;
+      background:#0b1020;
+      color:#eef2ff;
+    }
+    main{
+      max-width:900px;
+      margin:auto;
+      padding:14px;
+    }
+    .card{
+      background:#111827;
+      border:1px solid #263247;
+      border-radius:16px;
+      padding:14px;
+      margin-bottom:14px;
+    }
+    h1{margin-top:0}
+    input,button{
+      width:100%;
+      box-sizing:border-box;
+      padding:12px;
+      margin-top:8px;
+      border-radius:10px;
+      border:1px solid #334155;
+      font-size:16px;
+    }
+    input{
+      background:#0f172a;
+      color:#fff;
+    }
+    button{
+      background:#2563eb;
+      color:#fff;
+      cursor:pointer;
+    }
+    video{
+      width:100%;
+      max-height:420px;
+      background:#000;
+      border-radius:14px;
+      margin-top:10px;
+    }
+    img{
+      width:100%;
+      border-radius:14px;
+      margin-top:10px;
+    }
+    .status{
+      padding:8px;
+      border-radius:8px;
+      background:#0f172a;
+      margin:6px 0;
+    }
+    .ok{color:#22c55e}
+    .bad{color:#ef4444}
+    .warn{color:#f59e0b}
+    pre{
+      white-space:pre-wrap;
+      word-break:break-word;
+    }
+  </style>
+</head>
+
+<body>
+<main>
+
+  <div class="card">
+    <h1>🪙 GoldHunterAI v5</h1>
+    <p>Satellite Database • GPS • Camera • Magnetometer</p>
+  </div>
+
+  <div class="card">
+    <h2>🔌 حالة النظام</h2>
+
+    <div class="status">
+      API:
+      <span id="apiStatus" class="warn">🟡 فحص...</span>
+    </div>
+
+    <div class="status">
+      Database/PostGIS:
+      <span id="dbStatus" class="warn">🟡 فحص...</span>
+    </div>
+
+    <div class="status">
+      Camera:
+      <span id="cameraStatus" class="warn">🟡 غير مفحوصة</span>
+    </div>
+
+    <div class="status">
+      GPS:
+      <span id="gpsStatus" class="warn">🟡 غير مفحوص</span>
+    </div>
+
+  </div>
+
+  <div class="card">
+    <h2>⚙️ إعداد API</h2>
+
+    <input
+      id="apiUrl"
+      type="url"
+      placeholder="https://your-api.example.com"
+    >
+
+    <button onclick="saveApi()">💾 حفظ عنوان API</button>
+    <button onclick="checkHealth()">🔄 فحص الاتصال</button>
+  </div>
+
+  <div class="card">
+    <h2>📷 الكاميرا</h2>
+
+    <video id="video" autoplay playsinline></video>
+
+    <button onclick="startCamera()">▶️ تشغيل الكاميرا</button>
+    <button onclick="capturePhoto()">📸 التقاط صورة</button>
+
+    <canvas id="canvas" style="display:none"></canvas>
+
+    <img id="photo" style="display:none">
+
+    <button onclick="retakePhoto()">🔄 إعادة التصوير</button>
+  </div>
+
+  <div class="card">
+    <h2>📍 GPS</h2>
+
+    <button onclick="getGPS()">📍 الحصول على الموقع</button>
+
+    <pre id="gpsResult">لم يتم تحديد الموقع بعد.</pre>
+  </div>
+
+  <div class="card">
+    <h2>🧲 Magnetometer</h2>
+
+    <input
+      id="magnetometer"
+      type="number"
+      step="any"
+      placeholder="قيمة nT"
+    >
+
+    <button onclick="sendMagnetometer()">
+      إرسال قراءة المغناطيسية
+    </button>
+
+    <pre id="magResult"></pre>
+  </div>
+
+  <div class="card">
+    <h2>🛰️ تحليل Sentinel-2</h2>
+
+    <input id="startDate" type="date">
+    <input id="endDate" type="date">
+
+    <button onclick="analyzeSatellite()">
+      🛰️ تحليل بيانات الأقمار
+    </button>
+
+    <pre id="satResult"></pre>
+  </div>
+
+  <div class="card">
+    <h2>🔎 فحص القابلية للاستكشاف</h2>
+
+    <button onclick="analyzeProspectivity()">
+      🔎 تحليل الموقع
+    </button>
+
+    <pre id="prospectivityResult"></pre>
+  </div>
+
+  <div class="card">
+    <h2>💾 حفظ العينة</h2>
+
+    <input id="sampleNo" placeholder="رقم العينة">
+
+    <input id="notes" placeholder="ملاحظات">
+
+    <button onclick="saveSample()">
+      💾 حفظ العينة في PostgreSQL/PostGIS
+    </button>
+
+    <pre id="sampleResult"></pre>
+  </div>
+
+</main>
+
+<script>
+let stream = null;
+let latitude = null;
+let longitude = null;
+let gpsAccuracy = null;
+
+const apiInput = document.getElementById("apiUrl");
+
+apiInput.value =
+  localStorage.getItem("goldhunter_api_url") || "";
+
+function apiBase(){
+  return apiInput.value.trim().replace(/\/+$/, "");
+}
+
+function saveApi(){
+  const url = apiBase();
+
+  if(!url){
+    alert("أدخل عنوان API أولًا");
+    return;
+  }
+
+  localStorage.setItem("goldhunter_api_url", url);
+  checkHealth();
+}
+
+async function checkHealth(){
+  const apiStatus = document.getElementById("apiStatus");
+  const dbStatus = document.getElementById("dbStatus");
+
+  apiStatus.textContent = "🟡 فحص...";
+  dbStatus.textContent = "🟡 فحص...";
+
+  try{
+    const response = await fetch(apiBase() + "/health");
+
+    if(!response.ok)
+      throw new Error("HTTP " + response.status);
+
+    const data = await response.json();
+
+    apiStatus.textContent =
+      data.api === "ok" ? "🟢 متصل" : "🔴 خطأ";
+
+    dbStatus.textContent =
+      data.database === "ok"
+        ? "🟢 متصلة"
+        : "🔴 غير متاحة";
+
+  }catch(error){
+
+    apiStatus.textContent = "🔴 غير متصل";
+    dbStatus.textContent = "🔴 غير متاحة";
+
+    console.error(error);
+  }
+}
+
+async function startCamera(){
+
+  const status =
+    document.getElementById("cameraStatus");
+
+  try{
+
+    if(!navigator.mediaDevices ||
+       !navigator.mediaDevices.getUserMedia){
+
+      throw new Error(
+        "getUserMedia غير متاح في هذا WebView"
+      );
+    }
+
+    stream =
+      await navigator.mediaDevices.getUserMedia({
+        video:{
+          facingMode:{ideal:"environment"}
+        },
+        audio:false
+      });
+
+    document.getElementById("video").srcObject =
+      stream;
+
+    status.textContent = "🟢 متاحة";
+
+  }catch(error){
+
+    status.textContent =
+      "🔴 فشل تشغيل الكاميرا";
+
+    alert(error.message);
+  }
+}
+
+function capturePhoto(){
+
+  if(!stream){
+    alert("شغّل الكاميرا أولًا");
+    return;
+  }
+
+  const video =
+    document.getElementById("video");
+
+  const canvas =
+    document.getElementById("canvas");
+
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+
+  canvas.getContext("2d")
+    .drawImage(video,0,0);
+
+  const photo =
+    document.getElementById("photo");
+
+  photo.src =
+    canvas.toDataURL("image/jpeg",0.9);
+
+  photo.style.display = "block";
+}
+
+function retakePhoto(){
+
+  const photo =
+    document.getElementById("photo");
+
+  photo.src = "";
+  photo.style.display = "none";
+
+  startCamera();
+}
+
+function getGPS(){
+
+  const status =
+    document.getElementById("gpsStatus");
+
+  if(!navigator.geolocation){
+
+    status.textContent =
+      "🔴 GPS غير مدعوم";
+
+    return;
+  }
+
+  status.textContent = "🟡 تحديد الموقع...";
+
+  navigator.geolocation.getCurrentPosition(
+
+    position => {
+
+      latitude =
+        position.coords.latitude;
+
+      longitude =
+        position.coords.longitude;
+
+      gpsAccuracy =
+        position.coords.accuracy;
+
+      status.textContent = "🟢 جاهز";
+
+      document.getElementById("gpsResult")
+        .textContent =
+        JSON.stringify({
+          latitude,
+          longitude,
+          accuracy_m:gpsAccuracy
+        },null,2);
+    },
+
+    error => {
+
+      status.textContent =
+        "🔴 فشل GPS";
+
+      document.getElementById("gpsResult")
+        .textContent = error.message;
+    },
+
+    {
+      enableHighAccuracy:true,
+      timeout:15000,
+      maximumAge:0
+    }
+  );
+}
+
+async function sendMagnetometer(){
+
+  if(latitude === null){
+    alert("حدد GPS أولًا");
+    return;
+  }
+
+  const value =
+    Number(
+      document.getElementById("magnetometer").value
+    );
+
+  if(!Number.isFinite(value)){
+    alert("أدخل قراءة Magnetometer");
+    return;
+  }
+
+  const result =
+    document.getElementById("magResult");
+
+  try{
+
+    const response =
+      await fetch(
+        apiBase() +
+        "/api/v1/magnetometer/survey",
+        {
+          method:"POST",
+          headers:{
+            "Content-Type":"application/json"
+          },
+          body:JSON.stringify({
+            latitude,
+            longitude,
+            magnetometer_nt:value
+          })
+        }
+      );
+
+    result.textContent =
+      JSON.stringify(
+        await response.json(),
+        null,
+        2
+      );
+
+  }catch(error){
+
+    result.textContent =
+      "خطأ: " + error.message;
+  }
+}
+
+async function analyzeSatellite(){
+
+  if(latitude === null){
+    alert("حدد GPS أولًا");
+    return;
+  }
+
+  const startDate =
+    document.getElementById("startDate").value;
+
+  const endDate =
+    document.getElementById("endDate").value;
+
+  if(!startDate || !endDate){
+    alert("حدد تاريخ البداية والنهاية");
+    return;
+  }
+
+  const result =
+    document.getElementById("satResult");
+
+  try{
+
+    const response =
+      await fetch(
+        apiBase() +
+        "/api/v1/satellite/analyze",
+        {
+          method:"POST",
+          headers:{
+            "Content-Type":"application/json"
+          },
+          body:JSON.stringify({
+            latitude,
+            longitude,
+            start_date:startDate,
+            end_date:endDate,
+            max_cloud:20
+          })
+        }
+      );
+
+    result.textContent =
+      JSON.stringify(
+        await response.json(),
+        null,
+        2
+      );
+
+  }catch(error){
+
+    result.textContent =
+      "خطأ: " + error.message;
+  }
+}
+
+async function analyzeProspectivity(){
+
+  if(latitude === null){
+    alert("حدد GPS أولًا");
+    return;
+  }
+
+  const mag =
+    Number(
+      document.getElementById("magnetometer").value
+    );
+
+  const payload = {
+    latitude,
+    longitude
+  };
+
+  if(Number.isFinite(mag))
+    payload.magnetometer_nt = mag;
+
+  const result =
+    document.getElementById(
+      "prospectivityResult"
+    );
+
+  try{
+
+    const response =
+      await fetch(
+        apiBase() +
+        "/api/v1/prospectivity/analyze",
+        {
+          method:"POST",
+          headers:{
+            "Content-Type":"application/json"
+          },
+          body:JSON.stringify(payload)
+        }
+      );
+
+    result.textContent =
+      JSON.stringify(
+        await response.json(),
+        null,
+        2
+      );
+
+  }catch(error){
+
+    result.textContent =
+      "خطأ: " + error.message;
+  }
+}
+
+async function saveSample(){
+
+  if(latitude === null){
+    alert("حدد GPS أولًا");
+    return;
+  }
+
+  const sampleNo =
+    document.getElementById("sampleNo").value.trim();
+
+  if(!sampleNo){
+    alert("أدخل رقم العينة");
+    return;
+  }
+
+  const mag =
+    Number(
+      document.getElementById("magnetometer").value
+    );
+
+  const payload = {
+    sample_no:sampleNo,
+    latitude,
+    longitude,
+    gps_accuracy_m:gpsAccuracy,
+    notes:
+      document.getElementById("notes").value
+  };
+
+  if(Number.isFinite(mag))
+    payload.magnetometer_nt = mag;
+
+  const result =
+    document.getElementById("sampleResult");
+
+  try{
+
+    const response =
+      await fetch(
+        apiBase() +
+        "/api/v1/samples",
+        {
+          method:"POST",
+          headers:{
+            "Content-Type":"application/json"
+          },
+          body:JSON.stringify(payload)
+        }
+      );
+
+    result.textContent =
+      JSON.stringify(
+        await response.json(),
+        null,
+        2
+      );
+
+  }catch(error){
+
+    result.textContent =
+      "خطأ: " + error.message;
+  }
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,1 @@
+# GoldHunterAI application package
